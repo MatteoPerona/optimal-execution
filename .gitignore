@@ -1,0 +1,19 @@
+# Data
+data/
+
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+
+archive/
+
+# Figures (regenerated from notebooks)
+figures/
