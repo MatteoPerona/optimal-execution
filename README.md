@@ -13,6 +13,12 @@ If neither fires by the last tick, we execute there as a fallback.
 
 Parameters are fit separately for **penny-spread** stocks (INTC, MSFT) and **wide-spread** stocks (AMZN, GOOG). The algorithm auto-detects which type it's dealing with from the first minute of data.
 
+## Final Comparison
+
+![Final held-out strategy comparison](assets/final_strategy_comparison.png)
+
+Held-out test performance comparison from `base_strategy_walkthrough.ipynb`(5-11-2026-11:45am).
+
 ## Project Structure
 
 ```
