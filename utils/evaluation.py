@@ -17,7 +17,7 @@ def evaluate_strategy(strategy_cls, test_data, fitted_params, signal_fn, side):
             continue
         arch = grp['archetype'].iloc[0]
         tod_bucket = grp['tod_bucket'].iloc[0]
-        params = fitted_params.get((arch, tod_bucket), fitted_params.get((arch, 'mid')))
+        params = strategy_cls.lookup_params(fitted_params, grp)
         if params is None:
             continue
         twap_val = grp['twap_ask'].iloc[0] if side == 'buy' else grp['twap_bid'].iloc[0]
