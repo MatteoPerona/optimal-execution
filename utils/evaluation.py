@@ -16,10 +16,7 @@ def evaluate_strategy(strategy_cls, test_data, fitted_params, signal_fn, side):
         if len(grp) < 5:
             continue
         arch = grp['archetype'].iloc[0]
-        tod_bucket = grp['tod_bucket'].iloc[0]
-        params = strategy_cls.lookup_params(fitted_params, grp)
-        if params is None:
-            continue
+        params = fitted_params[arch]
         twap_val = grp['twap_ask'].iloc[0] if side == 'buy' else grp['twap_bid'].iloc[0]
         ask = grp['AskPrice_1'].values
         bid = grp['BidPrice_1'].values
@@ -35,7 +32,6 @@ def evaluate_strategy(strategy_cls, test_data, fitted_params, signal_fn, side):
             'ticker': ticker,
             'minute_start': minute,
             'archetype': arch,
-            'tod_bucket': tod_bucket,
             'twap': twap_val,
             'med_spread': med_spread,
             'strategy': sign * (twap_val - strategy_price),

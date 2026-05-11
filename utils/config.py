@@ -20,14 +20,6 @@ DEFAULT_CONFIG = {
     'spread_grid_wide': (0.05, 0.50, 20),
     'smooth_size': 3,
 
-    # Time-of-day buckets (seconds since midnight)
-    # open: 9:30–10:00, mid: 10:00–15:30, close: 15:30–16:00
-    'tod_buckets': {
-        'open':  (34200, 36000),
-        'mid':   (36000, 55800),
-        'close': (55800, 57600),
-    },
-
     # Signal analysis
     'horizons': (10, 20, 30, 60),
     'n_bins': 20,

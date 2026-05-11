@@ -20,11 +20,6 @@ def load_and_preprocess(ticker, data_dir='data'):
     df['oi'] = df['BidSize_1'] / (df['BidSize_1'] + df['AskSize_1'])
     df['t_elapsed'] = df['seconds'] - df['minute_start']
     df['ticker'] = ticker
-    df['tod_bucket'] = pd.cut(
-        df['seconds'],
-        bins=[34200, 36000, 55800, 57600],
-        labels=['open', 'mid', 'close'],
-    )
     return df
 
 
