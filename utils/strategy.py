@@ -207,6 +207,83 @@ class TimeOfDayOIThresholdStrategy(OIThresholdStrategy):
         return fitted_params[(arch, nearest)]
 
 
+class TodPennnyOIThresholdStrategy(TimeOfDayOIThresholdStrategy):
+    """Apply time-of-day scaling to penny stocks only."""
+
+    name = 'todpennny'
+
+    @classmethod
+    def fit_params(cls, train_data, config, signal_fn='oi'):
+        """Use minute-of-day scaling for penny and fixed thresholds for wide."""
+        smooth_size = config.get('smooth_size', 3)
+        fitted = {}
+        details = {}
+
+        for arch in ['penny', 'wide']:
+            arch_train = train_data[train_data['archetype'] == arch].copy()
+            pre = precompute_minute_data(arch_train, signal_fn)
+            if len(pre) < 5:
+                continue
+
+            base_params, side_details = _fit_params_for_precomputed(
+                cls, pre, arch, signal_fn, smooth_size
+            )
+
+            if arch != 'penny':
+                fitted[arch] = base_params
+                details[(arch, 'base')] = base_params
+                details[(arch, 'side_details')] = side_details
+                continue
+
+            minute_profile = (
+                arch_train.assign(minute_of_day=(arch_train['minute_start'] // 60).astype(int))
+                .groupby('minute_of_day')
+                .agg(avg_spread=('spread', 'mean'))
+                .reset_index()
+                .sort_values('minute_of_day')
+            )
+
+            spread_curve = minute_profile['avg_spread'].to_numpy(dtype=float)
+            if len(spread_curve) == 0:
+                continue
+            spread_curve = uniform_filter1d(spread_curve, smooth_size)
+            spread_ratio = spread_curve / spread_curve.mean()
+
+            minutes = minute_profile['minute_of_day'].to_numpy(dtype=int)
+            minute_grid = np.arange(minutes.min(), minutes.max() + 1)
+            minute_ratio = np.interp(minute_grid, minutes, spread_ratio)
+
+            for minute_of_day, ratio in zip(minute_grid, minute_ratio):
+                theta_spread = float(base_params['theta_spread'] * (ratio ** cls.spread_power))
+                theta_imb = float(np.clip(
+                    base_params['theta_imb'] + cls.imb_sensitivity * (ratio - 1.0),
+                    cls.min_theta_imb,
+                    cls.max_theta_imb,
+                ))
+                fitted[(arch, int(minute_of_day))] = {
+                    'theta_imb': theta_imb,
+                    'theta_spread': theta_spread,
+                }
+
+            details[(arch, 'base')] = base_params
+            details[(arch, 'minute_profile')] = minute_profile.assign(
+                smoothed_spread=spread_curve,
+                spread_ratio=spread_ratio,
+            )
+            details[(arch, 'side_details')] = side_details
+
+        return fitted, details
+
+    @classmethod
+    def lookup_params(cls, fitted_params, grp):
+        """Use minute-of-day schedule for penny and fixed thresholds for wide."""
+        arch = grp['archetype'].iloc[0]
+        if arch != 'penny':
+            return fitted_params.get(arch)
+
+        return super().lookup_params(fitted_params, grp)
+
+
 # Backward-compatible alias for notebooks that still import the old name.
 TimeVaryingOIThresholdStrategy = TimeOfDayOIThresholdStrategy
 
