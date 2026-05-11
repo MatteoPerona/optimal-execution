@@ -13,6 +13,7 @@ Usage
     from utils.strategies_adapter import (
         run_experiment_v9,
         EnsembleAdapter,
+        TimeOfDayEnsembleAdapter,
         SpreadQuantileAdapter,
         OFIContrarianAdapter,
         MicropriceAdapter,
@@ -186,9 +187,165 @@ class EnsembleAdapter(_AdapterBase):
         return _Ensemble(**combo)
 
 
+class TimeOfDayEnsembleAdapter(_AdapterBase):
+    """Wraps strategies.Ensemble with a minute-of-day combo schedule."""
+
+    name = 'todensemble'
+    _COMBOS = PARAM_GRIDS['Ensemble']
+
+    def _build_inner(self, combo):
+        return _Ensemble(**combo)
+
+    @classmethod
+    def fit_params(cls, train_data, config, signal_fn='oi'):
+        """Use a minute-of-day combo schedule for penny and a fixed combo for wide."""
+        fitted = {}
+        details = {}
+        min_minutes = int(config.get('time_of_day_min_minutes', 5))
+
+        baseline_fitted, baseline_details = _fit_fixed_combo_params(
+            cls, train_data, signal_fn=signal_fn, verbose=False
+        )
+
+        for arch in ['penny', 'wide']:
+            arch_train = train_data[train_data['archetype'] == arch]
+            base_params = baseline_fitted.get(arch)
+            if arch_train.empty or base_params is None:
+                continue
+
+            if arch != 'penny':
+                fitted[arch] = base_params
+                details[(arch, 'base')] = base_params
+                details[(arch, 'baseline_score')] = baseline_details.get((arch, 'score'))
+                continue
+
+            base_idx = int(round(base_params['combo_idx']))
+            minute_buckets = {}
+            for (_, minute_start), grp in arch_train.groupby(['ticker', 'minute_start']):
+                if len(grp) < 5:
+                    continue
+                minute_of_day = int(minute_start // 60)
+                minute_buckets.setdefault(minute_of_day, []).append(grp)
+
+            observed_minutes = sorted(minute_buckets)
+            if not observed_minutes:
+                fitted[arch] = base_params
+                details[(arch, 'base')] = base_params
+                details[(arch, 'baseline_score')] = baseline_details.get((arch, 'score'))
+                continue
+
+            for minute_of_day in observed_minutes:
+                groups = minute_buckets[minute_of_day]
+                if len(groups) < min_minutes:
+                    fitted[(arch, minute_of_day)] = {'combo_idx': float(base_idx)}
+                    continue
+
+                best_idx = base_idx
+                best_score = -np.inf
+                for combo_idx in range(len(cls._COMBOS)):
+                    params = {'combo_idx': float(combo_idx)}
+                    strat = cls(params=params, signal_fn=signal_fn)
+                    total = 0.0
+                    n = 0
+                    for grp in groups:
+                        for side in ['buy', 'sell']:
+                            price = strat.execute_minute(grp, side)
+                            twap = (grp['twap_ask'].iloc[0] if side == 'buy'
+                                    else grp['twap_bid'].iloc[0])
+                            total += (twap - price) if side == 'buy' else (price - twap)
+                            n += 1
+
+                    score = total / n if n > 0 else -np.inf
+                    if score > best_score:
+                        best_score = score
+                        best_idx = combo_idx
+
+                fitted[(arch, minute_of_day)] = {'combo_idx': float(best_idx)}
+                details[(arch, minute_of_day)] = {
+                    'combo_idx': float(best_idx),
+                    'num_minutes': len(groups),
+                    'score': best_score,
+                }
+
+            details[(arch, 'base')] = base_params
+            details[(arch, 'baseline_score')] = baseline_details.get((arch, 'score'))
+
+        return fitted, details
+
+    @classmethod
+    def lookup_params(cls, fitted_params, grp):
+        """Use minute-of-day combos for penny and a fixed combo for wide."""
+        arch = grp['archetype'].iloc[0]
+        if arch != 'penny':
+            return fitted_params.get(arch)
+
+        minute_of_day = int(grp['minute_start'].iloc[0] // 60)
+        key = (arch, minute_of_day)
+        if key in fitted_params:
+            return fitted_params[key]
+
+        if arch in fitted_params:
+            return fitted_params[arch]
+
+        arch_minutes = sorted(
+            k[1] for k in fitted_params
+            if isinstance(k, tuple) and len(k) == 2 and k[0] == arch and isinstance(k[1], (int, np.integer))
+        )
+        if not arch_minutes:
+            return None
+        if minute_of_day <= arch_minutes[0]:
+            return fitted_params[(arch, arch_minutes[0])]
+        if minute_of_day >= arch_minutes[-1]:
+            return fitted_params[(arch, arch_minutes[-1])]
+
+        nearest = min(arch_minutes, key=lambda m: abs(m - minute_of_day))
+        return fitted_params[(arch, nearest)]
+
+
 # ---------------------------------------------------------------------------
-# run_experiment_v9: the right entry point for all adapter strategies
+# Fitting helpers + run_experiment_v9 entry point
 # ---------------------------------------------------------------------------
+
+def _fit_fixed_combo_params(strategy_cls, train_data, signal_fn='oi', verbose=False):
+    """Fit one fixed combo per archetype for adapter strategies."""
+    fitted = {}
+    details = {}
+    n_combos = len(strategy_cls._COMBOS)
+
+    for arch in ['penny', 'wide']:
+        arch_train = train_data[train_data['archetype'] == arch]
+        best_score = -np.inf
+        best_params = {'combo_idx': 0.0}
+
+        for combo_idx in range(n_combos):
+            params = {'combo_idx': float(combo_idx)}
+            strat = strategy_cls(params=params, signal_fn=signal_fn)
+
+            total, n = 0.0, 0
+            for (_, _), grp in arch_train.groupby(['ticker', 'minute_start']):
+                if len(grp) < 5:
+                    continue
+                for side in ['buy', 'sell']:
+                    price = strat.execute_minute(grp, side)
+                    twap = (grp['twap_ask'].iloc[0] if side == 'buy'
+                            else grp['twap_bid'].iloc[0])
+                    total += (twap - price) if side == 'buy' else (price - twap)
+                    n += 1
+
+            score = total / n if n > 0 else 0.0
+            if score > best_score:
+                best_score = score
+                best_params = params
+
+        fitted[arch] = best_params
+        details[(arch, 'score')] = best_score
+        if verbose:
+            idx = int(round(best_params['combo_idx']))
+            combo = strategy_cls._COMBOS[idx]
+            print(f"    {arch}: combo {idx} {combo}  score={best_score:.6f}")
+
+    return fitted, details
+
 
 def run_experiment_v9(strategy_cls, config, verbose=True):
     """End-to-end experiment runner for v9_final adapter strategies.
@@ -214,7 +371,6 @@ def run_experiment_v9(strategy_cls, config, verbose=True):
     dict with the same keys as run_experiment():
         'fitted', 'test_all', 'data', 'frames', 'archetypes',
         'train_data', 'test_data'
-        ('details' is empty — no smoothed surface for fixed-combo search)
     """
     from .preprocessing import load_all_stocks, train_test_split
     from .evaluation import evaluate_both_sides
@@ -233,44 +389,26 @@ def run_experiment_v9(strategy_cls, config, verbose=True):
               f"Test:  {test_data['minute_start'].nunique()} min")
 
     # ------------------------------------------------------------------
-    # Fitting: iterate over fixed combos, score each via execute_minute()
+    # Fitting: either iterate over fixed combos or use a strategy-specific
+    # minute-of-day schedule when the adapter defines fit_params().
     # ------------------------------------------------------------------
     if verbose:
-        print("  Fitting parameters (iterating over fixed combos)...")
+        print("  Fitting parameters...")
 
-    fitted = {}
-    n_combos = len(strategy_cls._COMBOS)
-
-    for arch in ['penny', 'wide']:
-        arch_train = train_data[train_data['archetype'] == arch]
-        best_score  = -np.inf
-        best_params = {'combo_idx': 0.0}
-
-        for combo_idx in range(n_combos):
-            params = {'combo_idx': float(combo_idx)}
-            strat  = strategy_cls(params=params, signal_fn='oi')
-
-            total, n = 0.0, 0
-            for (_, _), grp in arch_train.groupby(['ticker', 'minute_start']):
-                if len(grp) < 5:
-                    continue
-                for side in ['buy', 'sell']:
-                    price = strat.execute_minute(grp, side)
-                    twap  = (grp['twap_ask'].iloc[0] if side == 'buy'
-                             else grp['twap_bid'].iloc[0])
-                    total += (twap - price) if side == 'buy' else (price - twap)
-                    n     += 1
-
-            score = total / n if n > 0 else 0.0
-            if score > best_score:
-                best_score  = score
-                best_params = params
-
-        fitted[arch] = best_params
+    if strategy_cls is not BaseStrategy and 'fit_params' in strategy_cls.__dict__:
+        fitted, details = strategy_cls.fit_params(train_data, config, signal_fn='oi')
         if verbose:
-            idx   = int(round(best_params['combo_idx']))
-            combo = strategy_cls._COMBOS[idx]
-            print(f"    {arch}: combo {idx} {combo}  score={best_score:.6f}")
+            for arch in ['penny', 'wide']:
+                base_params = details.get((arch, 'base'), fitted.get(arch))
+                if base_params is None:
+                    continue
+                idx = int(round(base_params['combo_idx']))
+                combo = strategy_cls._COMBOS[idx]
+                print(f"    {arch}: base combo {idx} {combo}")
+    else:
+        fitted, details = _fit_fixed_combo_params(
+            strategy_cls, train_data, signal_fn='oi', verbose=verbose
+        )
 
     # ------------------------------------------------------------------
     # Backtesting: identical to the main pipeline
@@ -282,7 +420,7 @@ def run_experiment_v9(strategy_cls, config, verbose=True):
 
     return {
         'fitted':     fitted,
-        'details':    {},          # no smoothed surface for fixed-combo search
+        'details':    details,
         'test_all':   test_all,
         'data':       data,
         'frames':     frames,

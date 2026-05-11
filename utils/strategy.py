@@ -118,10 +118,10 @@ class OIThresholdStrategy(BaseStrategy):
             }
 
 
-class TimeVaryingOIThresholdStrategy(OIThresholdStrategy):
+class TimeOfDayOIThresholdStrategy(OIThresholdStrategy):
     """Scale crossing thresholds by the smoothed intraday spread profile."""
 
-    name = 'Time-Varying OI Threshold'
+    name = 'TimeOfDay'
     imb_sensitivity = 0.08
     spread_power = 1.0
     min_theta_imb = 0.50
@@ -205,6 +205,10 @@ class TimeVaryingOIThresholdStrategy(OIThresholdStrategy):
 
         nearest = min(arch_minutes, key=lambda m: abs(m - minute_of_day))
         return fitted_params[(arch, nearest)]
+
+
+# Backward-compatible alias for notebooks that still import the old name.
+TimeVaryingOIThresholdStrategy = TimeOfDayOIThresholdStrategy
 
 
 # ---------------------------------------------------------------------------
