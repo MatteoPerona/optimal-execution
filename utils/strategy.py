@@ -80,6 +80,12 @@ class BaseStrategy:
         """Construct an instance from individual grid-search param values."""
         return cls(params=kwargs, signal_fn=signal_fn)
 
+    @classmethod
+    def lookup_params(cls, fitted_params, grp):
+        """Select the fitted params to use for one minute group."""
+        arch = grp['archetype'].iloc[0]
+        return fitted_params.get(arch)
+
 
 # ---------------------------------------------------------------------------
 # Built-in strategy: fixed OI + spread threshold
@@ -112,6 +118,95 @@ class OIThresholdStrategy(BaseStrategy):
             }
 
 
+class TimeVaryingOIThresholdStrategy(OIThresholdStrategy):
+    """Scale crossing thresholds by the smoothed intraday spread profile."""
+
+    name = 'Time-Varying OI Threshold'
+    imb_sensitivity = 0.08
+    spread_power = 1.0
+    min_theta_imb = 0.50
+    max_theta_imb = 0.99
+
+    @classmethod
+    def fit_params(cls, train_data, config, signal_fn='oi'):
+        """Fit one baseline threshold pair, then scale it by minute of day."""
+        smooth_size = config.get('smooth_size', 3)
+        fitted = {}
+        details = {}
+
+        for arch in ['penny', 'wide']:
+            arch_train = train_data[train_data['archetype'] == arch].copy()
+            pre = precompute_minute_data(arch_train, signal_fn)
+            if len(pre) < 5:
+                continue
+
+            base_params, side_details = _fit_params_for_precomputed(
+                cls, pre, arch, signal_fn, smooth_size
+            )
+
+            minute_profile = (
+                arch_train.assign(minute_of_day=(arch_train['minute_start'] // 60).astype(int))
+                .groupby('minute_of_day')
+                .agg(avg_spread=('spread', 'mean'))
+                .reset_index()
+                .sort_values('minute_of_day')
+            )
+
+            spread_curve = minute_profile['avg_spread'].to_numpy(dtype=float)
+            if len(spread_curve) == 0:
+                continue
+            spread_curve = uniform_filter1d(spread_curve, smooth_size)
+            spread_ratio = spread_curve / spread_curve.mean()
+
+            minutes = minute_profile['minute_of_day'].to_numpy(dtype=int)
+            minute_grid = np.arange(minutes.min(), minutes.max() + 1)
+            minute_ratio = np.interp(minute_grid, minutes, spread_ratio)
+
+            for minute_of_day, ratio in zip(minute_grid, minute_ratio):
+                theta_spread = float(base_params['theta_spread'] * (ratio ** cls.spread_power))
+                theta_imb = float(np.clip(
+                    base_params['theta_imb'] + cls.imb_sensitivity * (ratio - 1.0),
+                    cls.min_theta_imb,
+                    cls.max_theta_imb,
+                ))
+                fitted[(arch, int(minute_of_day))] = {
+                    'theta_imb': theta_imb,
+                    'theta_spread': theta_spread,
+                }
+
+            details[(arch, 'base')] = base_params
+            details[(arch, 'minute_profile')] = minute_profile.assign(
+                smoothed_spread=spread_curve,
+                spread_ratio=spread_ratio,
+            )
+            details[(arch, 'side_details')] = side_details
+
+        return fitted, details
+
+    @classmethod
+    def lookup_params(cls, fitted_params, grp):
+        """Use the minute-of-day schedule, with edge fallback when needed."""
+        arch = grp['archetype'].iloc[0]
+        minute_of_day = int(grp['minute_start'].iloc[0] // 60)
+        key = (arch, minute_of_day)
+        if key in fitted_params:
+            return fitted_params[key]
+
+        arch_minutes = sorted(
+            k[1] for k in fitted_params
+            if k[0] == arch and isinstance(k[1], (int, np.integer))
+        )
+        if not arch_minutes:
+            return None
+        if minute_of_day <= arch_minutes[0]:
+            return fitted_params[(arch, arch_minutes[0])]
+        if minute_of_day >= arch_minutes[-1]:
+            return fitted_params[(arch, arch_minutes[-1])]
+
+        nearest = min(arch_minutes, key=lambda m: abs(m - minute_of_day))
+        return fitted_params[(arch, nearest)]
+
+
 # ---------------------------------------------------------------------------
 # Grid search — works with any BaseStrategy subclass
 # ---------------------------------------------------------------------------
@@ -130,6 +225,7 @@ def precompute_minute_data(subset, signal_fn):
             'bid': grp['BidPrice_1'].values,
             'twap_ask': grp['twap_ask'].iloc[0],
             'twap_bid': grp['twap_bid'].iloc[0],
+            'minute_of_day': int(minute // 60),
         })
     return minutes
 
@@ -182,6 +278,28 @@ def grid_search(strategy_cls, precomputed, archetype, side, signal_fn='oi'):
     return param_names, grid_arrays, scores
 
 
+def _fit_params_for_precomputed(strategy_cls, precomputed, archetype, signal_fn, smooth_size):
+    """Fit one parameter set for an already filtered collection of minutes."""
+    side_params = {}
+    side_details = {}
+
+    for side in ['buy', 'sell']:
+        param_names, grid_arrays, raw_scores = grid_search(
+            strategy_cls, precomputed, archetype, side, signal_fn
+        )
+        best_params, best_score, smoothed = smooth_and_select(
+            raw_scores, grid_arrays, param_names, smooth_size
+        )
+        side_params[side] = best_params
+        side_details[side] = (best_params, best_score, smoothed, param_names, grid_arrays)
+
+    all_keys = list(side_params['buy'].keys())
+    averaged = {
+        k: (side_params['buy'][k] + side_params['sell'][k]) / 2 for k in all_keys
+    }
+    return averaged, side_details
+
+
 def smooth_and_select(scores, grid_arrays, param_names, smooth_size=3):
     """Smooth a grid-search surface and return best params.
 
@@ -204,6 +322,9 @@ def fit_strategy(strategy_cls, train_data, config, signal_fn='oi'):
     fitted : dict — {archetype: best_params_dict}
     details : dict — {(archetype, side): (best_params, best_score, smoothed_surface, param_names, grid_arrays)}
     """
+    if strategy_cls is not BaseStrategy and 'fit_params' in strategy_cls.__dict__:
+        return strategy_cls.fit_params(train_data, config, signal_fn)
+
     smooth_size = config.get('smooth_size', 3)
 
     fitted = {}
@@ -213,23 +334,14 @@ def fit_strategy(strategy_cls, train_data, config, signal_fn='oi'):
         pre = precompute_minute_data(
             train_data[train_data['archetype'] == arch], signal_fn
         )
+        if len(pre) == 0:
+            continue
 
-        side_params = {}
-        for side in ['buy', 'sell']:
-            param_names, grid_arrays, raw_scores = grid_search(
-                strategy_cls, pre, arch, side, signal_fn
-            )
-            best_params, best_score, smoothed = smooth_and_select(
-                raw_scores, grid_arrays, param_names, smooth_size
-            )
-            side_params[side] = best_params
-            details[(arch, side)] = (best_params, best_score, smoothed, param_names, grid_arrays)
-
-        # Average buy/sell params
-        all_keys = list(side_params['buy'].keys())
-        fitted[arch] = {
-            k: (side_params['buy'][k] + side_params['sell'][k]) / 2 for k in all_keys
-        }
+        fitted[arch], side_details = _fit_params_for_precomputed(
+            strategy_cls, pre, arch, signal_fn, smooth_size
+        )
+        for side, detail in side_details.items():
+            details[(arch, side)] = detail
 
     return fitted, details
 

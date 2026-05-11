@@ -11,12 +11,18 @@ def evaluate_strategy(strategy_cls, test_data, fitted_params, signal_fn, side):
     """
     sig_fn = get_signal_fn(signal_fn)
     records = []
+    columns = [
+        'ticker', 'minute_start', 'archetype', 'twap',
+        'med_spread', 'strategy', 'first_tick', 'last_tick',
+    ]
 
     for (ticker, minute), grp in test_data.groupby(['ticker', 'minute_start']):
         if len(grp) < 5:
             continue
         arch = grp['archetype'].iloc[0]
-        params = fitted_params[arch]
+        params = strategy_cls.lookup_params(fitted_params, grp)
+        if params is None:
+            continue
         twap_val = grp['twap_ask'].iloc[0] if side == 'buy' else grp['twap_bid'].iloc[0]
         ask = grp['AskPrice_1'].values
         bid = grp['BidPrice_1'].values
@@ -39,7 +45,7 @@ def evaluate_strategy(strategy_cls, test_data, fitted_params, signal_fn, side):
             'last_tick': sign * (twap_val - last_price),
         })
 
-    return pd.DataFrame(records)
+    return pd.DataFrame(records, columns=columns)
 
 
 def evaluate_both_sides(strategy_cls, test_data, fitted_params, signal_fn='oi'):
