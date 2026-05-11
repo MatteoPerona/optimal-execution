@@ -130,6 +130,7 @@ def precompute_minute_data(subset, signal_fn):
             'bid': grp['BidPrice_1'].values,
             'twap_ask': grp['twap_ask'].iloc[0],
             'twap_bid': grp['twap_bid'].iloc[0],
+            'tod_bucket': grp['tod_bucket'].iloc[0],
         })
     return minutes
 
@@ -201,35 +202,40 @@ def fit_strategy(strategy_cls, train_data, config, signal_fn='oi'):
 
     Returns
     -------
-    fitted : dict — {archetype: best_params_dict}
-    details : dict — {(archetype, side): (best_params, best_score, smoothed_surface, param_names, grid_arrays)}
+    fitted : dict — {(archetype, tod_bucket): best_params_dict}
+    details : dict — {(archetype, tod_bucket, side): (best_params, best_score, smoothed_surface, param_names, grid_arrays)}
     """
     smooth_size = config.get('smooth_size', 3)
+    tod_buckets = list(config.get('tod_buckets', {'mid': None}).keys())
 
     fitted = {}
     details = {}
 
     for arch in ['penny', 'wide']:
-        pre = precompute_minute_data(
+        pre_all = precompute_minute_data(
             train_data[train_data['archetype'] == arch], signal_fn
         )
 
-        side_params = {}
-        for side in ['buy', 'sell']:
-            param_names, grid_arrays, raw_scores = grid_search(
-                strategy_cls, pre, arch, side, signal_fn
-            )
-            best_params, best_score, smoothed = smooth_and_select(
-                raw_scores, grid_arrays, param_names, smooth_size
-            )
-            side_params[side] = best_params
-            details[(arch, side)] = (best_params, best_score, smoothed, param_names, grid_arrays)
+        for bucket in tod_buckets:
+            pre = [m for m in pre_all if m['tod_bucket'] == bucket]
+            if len(pre) < 5:
+                continue
 
-        # Average buy/sell params
-        all_keys = list(side_params['buy'].keys())
-        fitted[arch] = {
-            k: (side_params['buy'][k] + side_params['sell'][k]) / 2 for k in all_keys
-        }
+            side_params = {}
+            for side in ['buy', 'sell']:
+                param_names, grid_arrays, raw_scores = grid_search(
+                    strategy_cls, pre, arch, side, signal_fn
+                )
+                best_params, best_score, smoothed = smooth_and_select(
+                    raw_scores, grid_arrays, param_names, smooth_size
+                )
+                side_params[side] = best_params
+                details[(arch, bucket, side)] = (best_params, best_score, smoothed, param_names, grid_arrays)
+
+            all_keys = list(side_params['buy'].keys())
+            fitted[(arch, bucket)] = {
+                k: (side_params['buy'][k] + side_params['sell'][k]) / 2 for k in all_keys
+            }
 
     return fitted, details
 
@@ -278,9 +284,9 @@ def run_experiment(strategy_cls, config, signal_fn='oi', verbose=True):
         print("  Fitting parameters...")
     fitted, details = fit_strategy(strategy_cls, train_data, config, signal_fn)
     if verbose:
-        for arch, params in fitted.items():
+        for (arch, bucket), params in fitted.items():
             param_str = ', '.join(f'{k}={v:.4f}' for k, v in params.items())
-            print(f"    {arch}: {param_str}")
+            print(f"    {arch}/{bucket}: {param_str}")
 
     if verbose:
         print("  Backtesting...")
