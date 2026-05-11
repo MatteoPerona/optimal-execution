@@ -16,15 +16,19 @@ Parameters are fit separately for **penny-spread** stocks (INTC, MSFT) and **wid
 ## Project Structure
 
 ```
-├── base_strategy_walkthrough.ipynb   <- Start here. Runs the full pipeline.
+├── README.md                         <- Project overview and usage
+├── base_strategy_walkthrough.ipynb   <- Main walkthrough notebook for the full pipeline
+├── two_window_experiment.ipynb       <- Extra notebook for the two-window strategy
 ├── utils/
+│   ├── __init__.py                   <- Package marker
 │   ├── config.py                     <- All experiment settings in one place
 │   ├── preprocessing.py              <- Load CSVs, detect archetype, compute TWAP
 │   ├── signals.py                    <- Signal functions (OI, weighted OI, etc.)
-│   ├── strategy.py                   <- BaseStrategy class, grid search, run_experiment()
+│   ├── strategy.py                   <- Strategy classes, fitting logic, run_experiment()
 │   └── evaluation.py                 <- Backtest, print_results(), compare_strategies()
 ├── data/                             <- LOB data CSVs (not committed)
-└── base_strategy_walkthrough_dep.ipynb  <- Old notebook, kept for reference
+├── requirements.txt                  <- Python dependencies
+└── Project Plan 2026.pdf             <- Project planning document
 ```
 
 ## Quick Start
