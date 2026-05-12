@@ -24,12 +24,12 @@ Held-out test performance comparison from `base_strategy_walkthrough.ipynb`(5-11
 ```
 ├── README.md                         <- Project overview and usage
 ├── base_strategy_walkthrough.ipynb   <- Main walkthrough notebook for the full pipeline
-├── heldout_todpennny_test.ipynb      <- Clean held-out test notebook for the final TodPennny strategy
 ├── two_window_experiment.ipynb       <- Extra notebook for the two-window strategy
-├── test/
+├── heldout_test/
 │   ├── __init__.py                   <- Held-out evaluation entrypoint
 │   ├── preprocessing.py              <- Train/test split-specific CSV loading
-│   └── experiment.py                 <- Fit-on-train, evaluate-on-test runner
+│   ├── experiment.py                 <- Fit-on-train, evaluate-on-test runner
+│   └── heldout_todpennny_test.ipynb  <- Clean Colab notebook for final TodPennny held-out testing
 ├── utils/
 │   ├── __init__.py                   <- Package marker
 │   ├── config.py                     <- All experiment settings in one place
@@ -57,14 +57,14 @@ Open `base_strategy_walkthrough.ipynb` and run all cells. It will:
 The repo now has two separate workflows:
 
 - `utils/` is the development path. `run_experiment()` uses the original internal `train_frac` split for tuning and strategy comparison.
-- `test/` is the final reporting path. `run_external_test_experiment()` fits on all of `data-train/*_train.csv` and evaluates once on all of `data-test/*_test.csv`.
+- `heldout_test/` is the final reporting path. `run_external_test_experiment()` fits on all of `data-train/*_train.csv` and evaluates once on all of `data-test/*_test.csv`.
 
 The held-out test files are never used for fitting or hyperparameter selection.
 
 ```python
 from utils.config import DEFAULT_CONFIG
 from utils.strategy import OIThresholdStrategy
-from test import run_external_test_experiment
+from heldout_test import run_external_test_experiment
 
 config = DEFAULT_CONFIG.copy()
 config['stocks'] = ['AAPL', 'AMZN', 'GOOG', 'INTC', 'MSFT']

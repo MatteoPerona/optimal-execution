@@ -8,7 +8,11 @@ from utils.strategy import (
     fit_two_window,
 )
 
-from .preprocessing import load_all_stocks
+try:
+    from .preprocessing import load_all_stocks
+except ImportError:
+    # Support direct notebook imports after `sys.path.insert(0, 'test')`.
+    from preprocessing import load_all_stocks
 
 
 def _fit_on_all_train(strategy_cls, train_data, config, signal_fn):
