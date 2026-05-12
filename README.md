@@ -11,7 +11,7 @@ Each minute, we need to execute one share. Instead of executing at a random time
 
 If neither fires by the last tick, we execute there as a fallback.
 
-Parameters are fit separately for **penny-spread** stocks (INTC, MSFT) and **wide-spread** stocks (AMZN, GOOG). The algorithm auto-detects which type it's dealing with from the first minute of data.
+Parameters are fit separately for **penny-spread** and **wide-spread** stocks. The algorithm auto-detects which type it's dealing with from the first minute of training data.
 
 ## Final Comparison
 
@@ -24,7 +24,12 @@ Held-out test performance comparison from `base_strategy_walkthrough.ipynb`(5-11
 ```
 ├── README.md                         <- Project overview and usage
 ├── base_strategy_walkthrough.ipynb   <- Main walkthrough notebook for the full pipeline
+├── heldout_todpennny_test.ipynb      <- Clean held-out test notebook for the final TodPennny strategy
 ├── two_window_experiment.ipynb       <- Extra notebook for the two-window strategy
+├── test/
+│   ├── __init__.py                   <- Held-out evaluation entrypoint
+│   ├── preprocessing.py              <- Train/test split-specific CSV loading
+│   └── experiment.py                 <- Fit-on-train, evaluate-on-test runner
 ├── utils/
 │   ├── __init__.py                   <- Package marker
 │   ├── config.py                     <- All experiment settings in one place
@@ -32,7 +37,9 @@ Held-out test performance comparison from `base_strategy_walkthrough.ipynb`(5-11
 │   ├── signals.py                    <- Signal functions (OI, weighted OI, etc.)
 │   ├── strategy.py                   <- Strategy classes, fitting logic, run_experiment()
 │   └── evaluation.py                 <- Backtest, print_results(), compare_strategies()
-├── data/                             <- LOB data CSVs (not committed)
+├── data/                             <- Original development dataset layout (not committed)
+├── data-train/                       <- Full training CSVs for final model fitting
+├── data-test/                        <- Full held-out test CSVs for final reporting
 ├── requirements.txt                  <- Python dependencies
 └── Project Plan 2026.pdf             <- Project planning document
 ```
@@ -44,6 +51,32 @@ Open `base_strategy_walkthrough.ipynb` and run all cells. It will:
 2. Show signal analysis plots
 3. Fit parameters via grid search
 4. Backtest on held-out data and print results
+
+## Held-Out Evaluation
+
+The repo now has two separate workflows:
+
+- `utils/` is the development path. `run_experiment()` uses the original internal `train_frac` split for tuning and strategy comparison.
+- `test/` is the final reporting path. `run_external_test_experiment()` fits on all of `data-train/*_train.csv` and evaluates once on all of `data-test/*_test.csv`.
+
+The held-out test files are never used for fitting or hyperparameter selection.
+
+```python
+from utils.config import DEFAULT_CONFIG
+from utils.strategy import OIThresholdStrategy
+from test import run_external_test_experiment
+
+config = DEFAULT_CONFIG.copy()
+config['stocks'] = ['AAPL', 'AMZN', 'GOOG', 'INTC', 'MSFT']
+config['train_data_dir'] = 'data-train'
+config['test_data_dir'] = 'data-test'
+
+heldout_results = run_external_test_experiment(
+    OIThresholdStrategy,
+    config,
+    signal_fn='oi',
+)
+```
 
 ## Adding a New Strategy
 

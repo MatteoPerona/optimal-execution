@@ -7,6 +7,8 @@ DEFAULT_CONFIG = {
     # Data
     'stocks': ['INTC', 'MSFT', 'AMZN', 'GOOG'],
     'data_dir': 'data',
+    'train_data_dir': 'data-train',
+    'test_data_dir': 'data-test',
 
     # Archetype detection
     'penny_spread_cutoff': 0.02,  # dollars

@@ -1,5 +1,7 @@
 # Data
 data/
+data-test/
+data-train/
 
 # OS
 .DS_Store
