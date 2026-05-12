@@ -13,7 +13,7 @@ To support final course testing, we added a separate `heldout_test/` directory t
 - reuses those frozen fitted parameters on `data-test/`
 - evaluates once on the held-out test files without refitting or retuning
 
-`TodPennnyOIThresholdStrategy` uses time-of-day threshold scaling for penny-spread stocks and a fixed threshold pair for wide-spread stocks, with archetypes determined from training data and then carried over to test data.
+`TodPennnyOIThresholdStrategy` uses time-of-day threshold scaling for penny-spread stocks and a fixed threshold pair for wide-spread stocks, with archetypes determined from training data and then carried over to test data. 
 
 ## How It Works
 
