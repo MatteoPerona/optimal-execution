@@ -20,7 +20,7 @@ def evaluate_strategy(strategy_cls, test_data, fitted_params, signal_fn, side):
         if len(grp) < 5:
             continue
         arch = grp['archetype'].iloc[0]
-        params = strategy_cls.lookup_params(fitted_params, grp)
+        params = strategy_cls.lookup_params(fitted_params, grp, side=side)
         if params is None:
             continue
         twap_val = grp['twap_ask'].iloc[0] if side == 'buy' else grp['twap_bid'].iloc[0]
