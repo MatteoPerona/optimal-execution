@@ -81,7 +81,7 @@ class BaseStrategy:
         return cls(params=kwargs, signal_fn=signal_fn)
 
     @classmethod
-    def lookup_params(cls, fitted_params, grp):
+    def lookup_params(cls, fitted_params, grp, side=None, **kwargs):
         """Select the fitted params to use for one minute group."""
         arch = grp['archetype'].iloc[0]
         return fitted_params.get(arch)
@@ -116,6 +116,44 @@ class OIThresholdStrategy(BaseStrategy):
                 'theta_imb': np.linspace(0.52, 0.95, 30),
                 'theta_spread': np.linspace(0.05, 0.50, 20),
             }
+
+
+class SplitSideOIThresholdStrategy(OIThresholdStrategy):
+    """Same as OIThreshold but with separate params for buy and sell sides."""
+
+    name = 'Split Buy/Sell OI'
+
+    @classmethod
+    def fit_params(cls, train_data, config, signal_fn='oi'):
+        """Fit separate (theta_imb, theta_spread) per archetype AND side."""
+        smooth_size = config.get('smooth_size', 3)
+        fitted = {}
+        details = {}
+
+        for arch in ['penny', 'wide']:
+            pre = precompute_minute_data(
+                train_data[train_data['archetype'] == arch], signal_fn
+            )
+            if len(pre) == 0:
+                continue
+
+            _, side_details = _fit_params_for_precomputed(
+                cls, pre, arch, signal_fn, smooth_size
+            )
+
+            # Store per (arch, side) instead of averaging
+            for side in ['buy', 'sell']:
+                best_params = side_details[side][0]
+                fitted[(arch, side)] = best_params
+                details[(arch, side)] = side_details[side]
+
+        return fitted, details
+
+    @classmethod
+    def lookup_params(cls, fitted_params, grp, side=None, **kwargs):
+        """Look up params by (archetype, side)."""
+        arch = grp['archetype'].iloc[0]
+        return fitted_params.get((arch, side))
 
 
 class TimeOfDayOIThresholdStrategy(OIThresholdStrategy):
@@ -184,7 +222,7 @@ class TimeOfDayOIThresholdStrategy(OIThresholdStrategy):
         return fitted, details
 
     @classmethod
-    def lookup_params(cls, fitted_params, grp):
+    def lookup_params(cls, fitted_params, grp, side=None, **kwargs):
         """Use the minute-of-day schedule, with edge fallback when needed."""
         arch = grp['archetype'].iloc[0]
         minute_of_day = int(grp['minute_start'].iloc[0] // 60)
@@ -275,7 +313,7 @@ class TodPennnyOIThresholdStrategy(TimeOfDayOIThresholdStrategy):
         return fitted, details
 
     @classmethod
-    def lookup_params(cls, fitted_params, grp):
+    def lookup_params(cls, fitted_params, grp, side=None, **kwargs):
         """Use minute-of-day schedule for penny and fixed thresholds for wide."""
         arch = grp['archetype'].iloc[0]
         if arch != 'penny':
