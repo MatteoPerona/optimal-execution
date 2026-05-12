@@ -2,6 +2,19 @@
 
 Beat TWAP by timing execution within each minute using order-book signals.
 
+## Overview
+
+The original `utils/` pipeline is the development workflow: load the data, fit strategy parameters, and compare candidate models using the internal split from the project notebook.
+
+To support final course testing, we added a separate `heldout_test/` directory that keeps the chosen model fixed and makes the train/test boundary explicit. That code:
+
+- loads full training CSVs from `data-train/`
+- fits only our chosen `TodPennnyOIThresholdStrategy` on all training rows only
+- reuses those frozen fitted parameters on `data-test/`
+- evaluates once on the held-out test files without refitting or retuning
+
+`TodPennnyOIThresholdStrategy` uses time-of-day threshold scaling for penny-spread stocks and a fixed threshold pair for wide-spread stocks, with archetypes determined from training data and then carried over to test data.
+
 ## How It Works
 
 Each minute, we need to execute one share. Instead of executing at a random time (TWAP), we scan tick-by-tick and execute when two conditions are met:
